@@ -12,15 +12,16 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         # Gradle 7.3.3 (pinned by the wrapper) only supports up to JDK 17, so
-        # the Gradle daemon must use OpenJDK 17.
+        # the Gradle daemon must use OpenJDK 17. We use the same JDK for the
+        # forked app JVM: GraalVM JS 22.1.0 (the embedded JavaScript engine)
+        # calls sun.misc.Unsafe.ensureClassInitialized, which was removed in
+        # JDK 23+ — so anything newer than 17 breaks project creation.
+        #
+        # (JBR was previously used here for HiDPI, but our LocalDensity
+        # override in the Main.kt patch reads vlabeler.uiScale directly, so
+        # no special JDK is required for scaling to work.)
         buildJdk = pkgs.jdk17;
-
-        # JetBrains Runtime — used to actually launch vLabeler. We bypass
-        # compose-jb's `run` task because injecting our own `executable` into
-        # it never reliably stuck. Instead we read the run task's classpath,
-        # mainClass, and system properties via an init script and then
-        # exec JBR ourselves.
-        runtimeJdk = pkgs.jetbrains.jdk;
+        runtimeJdk = buildJdk;
         jbrJava = "${runtimeJdk}/lib/openjdk/bin/java";
 
         # Default HiDPI scale. Override at run time:
@@ -147,7 +148,7 @@
           ARGS+=("-Dsun.java2d.uiScale=$SCALE")
 
           # Don't `exec` — we need the trap to fire so the patch is reverted.
-          echo ">>> vlabeler-run: launching JBR ${runtimeJdk.version} with uiScale=$SCALE"
+          echo ">>> vlabeler-run: launching OpenJDK ${runtimeJdk.version} with uiScale=$SCALE"
           ${jbrJava} "''${ARGS[@]}" -cp "$CP" "$MAIN"
         '';
       in {
@@ -165,7 +166,7 @@
 
             echo "vLabeler dev shell"
             echo "  Build JDK:  $(java -version 2>&1 | head -1)"
-            echo "  Runtime:    JBR ${runtimeJdk.version} (used to launch the app, supports HiDPI)"
+            echo "  Runtime:    OpenJDK ${runtimeJdk.version} (used to launch the app)"
             echo ""
             echo "  vlabeler-run                # launch with HiDPI scale ${defaultUiScale}"
             echo "  VLABELER_UI_SCALE=1.5 vlabeler-run"
