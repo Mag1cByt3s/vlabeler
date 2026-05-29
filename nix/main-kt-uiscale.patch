@@ -1,0 +1,75 @@
+diff --git a/src/jvmMain/kotlin/com/sdercolin/vlabeler/Main.kt b/src/jvmMain/kotlin/com/sdercolin/vlabeler/Main.kt
+index 97d3d279..6126bb2b 100644
+--- a/src/jvmMain/kotlin/com/sdercolin/vlabeler/Main.kt
++++ b/src/jvmMain/kotlin/com/sdercolin/vlabeler/Main.kt
+@@ -22,7 +22,9 @@ import androidx.compose.runtime.snapshotFlow
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.input.key.KeyEvent
++import androidx.compose.ui.platform.LocalDensity
+ import androidx.compose.ui.res.painterResource
++import androidx.compose.ui.unit.Density
+ import androidx.compose.ui.unit.DpSize
+ import androidx.compose.ui.unit.dp
+ import androidx.compose.ui.window.Window
+@@ -74,6 +76,13 @@ var hasUncaughtError = false
+ val UseCustomFileDialog = compositionLocalOf { false }
+ 
+ fun main(vararg args: String) = application {
++    // Compose Desktop 1.6 on Linux doesn't pick up AWT's defaultTransform
++    // scale for LocalDensity. We read a vlabeler-specific property instead
++    // of sun.java2d.uiScale, because JBR's Wayland support detects the
++    // compositor scale and clobbers sun.java2d.uiScale to that value during
++    // AWT init, which would override any -D we set on the command line.
++    val uiScale = System.getProperty("vlabeler.uiScale")?.toFloatOrNull() ?: 1f
++
+     remember { Log.init() }
+     remember { ensureDirectories() }
+ 
+@@ -119,24 +128,30 @@ fun main(vararg args: String) = application {
+             onCloseRequest = onCloseRequest,
+             onKeyEvent = onKeyEvent,
+         ) {
+-            LaunchWindowFocusListener(appState)
+-            LaunchSaveWindowSize(windowState, appRecordStore)
+-            Menu(mainScope, appState, appConf.value.view)
++            // Window establishes its own composition with its own LocalDensity
++            // derived from the JFrame's GraphicsConfiguration, so the density
++            // override has to live *inside* the content lambda — an outer
++            // CompositionLocalProvider doesn't cross the Window boundary.
++            CompositionLocalProvider(LocalDensity provides Density(uiScale)) {
++                LaunchWindowFocusListener(appState)
++                LaunchSaveWindowSize(windowState, appRecordStore)
++                Menu(mainScope, appState, appConf.value.view)
+ 
+-            if (appState == null) {
+-                AppTheme(appConf.value.view) { Splash() }
+-            }
++                if (appState == null) {
++                    AppTheme(appConf.value.view) { Splash() }
++                }
+ 
+-            appState?.let { state ->
+-                LaunchValidate(state)
+-                LaunchKeyboardEvent(state.keyboardViewModel, state, state.player)
+-                LaunchExit(state, ::exitApplication)
+-                LaunchTrackingLaunch(state)
+-                AppTheme(state.appConf.view) { App(mainScope, state) }
+-                StandaloneDialogs(mainScope, state)
+-                ProjectChangesListener(state)
+-                ProjectWriter(state)
+-                SnackbarBox(state)
++                appState?.let { state ->
++                    LaunchValidate(state)
++                    LaunchKeyboardEvent(state.keyboardViewModel, state, state.player)
++                    LaunchExit(state, ::exitApplication)
++                    LaunchTrackingLaunch(state)
++                    AppTheme(state.appConf.view) { App(mainScope, state) }
++                    StandaloneDialogs(mainScope, state)
++                    ProjectChangesListener(state)
++                    ProjectWriter(state)
++                    SnackbarBox(state)
++                }
+             }
+         }
+     }
