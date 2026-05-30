@@ -75,11 +75,17 @@
           }
         '';
 
-        # Source patch: adds LocalDensity override to Main.kt so our
-        # -Dvlabeler.uiScale=N takes effect. Kept as a separate file so the
-        # project source stays unmodified in git — the wrapper applies it
-        # before each build and reverts it on exit (including Ctrl-C).
-        uiScalePatch = ./nix/main-kt-uiscale.patch;
+        # Source patches applied before each build and reverted on exit
+        # (including Ctrl-C), so the project source stays unmodified in git.
+        #   - main-kt-uiscale.patch: LocalDensity override so -Dvlabeler.uiScale takes effect.
+        #   - chartrepo-png-fix.patch: normalises Skiko's BufferedImage to TYPE_INT_ARGB
+        #     before PNG encoding, fixing ArrayIndexOutOfBoundsException in
+        #     PNGImageWriter.encodePass when rendering waveform charts.
+        sourcePatches = [
+          ./nix/main-kt-uiscale.patch
+          ./nix/chartrepo-png-fix.patch
+        ];
+        sourcePatchesPathList = pkgs.lib.concatStringsSep " " (map toString sourcePatches);
 
         vlabelerRun = pkgs.writeShellScript "vlabeler-run" ''
           set -euo pipefail
@@ -97,30 +103,35 @@
 
           SCALE="''${VLABELER_UI_SCALE:-${defaultUiScale}}"
 
-          # Stage 0: apply the uiScale patch to Main.kt. Tracked so we only
-          # revert what we applied (the user may already have it applied, in
-          # which case we leave the tree as we found it).
-          PATCH=${uiScalePatch}
-          PATCHED_BY_US=0
-          if git apply --reverse --check "$PATCH" 2>/dev/null; then
-              # Patch is already applied; leave the tree as-is on exit.
-              :
-          elif git apply --check "$PATCH" 2>/dev/null; then
-              git apply "$PATCH"
-              PATCHED_BY_US=1
-          else
-              echo "Error: nix/main-kt-uiscale.patch can neither be applied nor is already applied." >&2
-              echo "Resolve any local edits to Main.kt and retry." >&2
-              exit 1
-          fi
+          # Stage 0: apply each source patch. Track which ones *we* applied
+          # so cleanup only reverts those (leaves user-applied patches alone).
+          PATCHES=( ${sourcePatchesPathList} )
+          APPLIED_BY_US=()
+          for P in "''${PATCHES[@]}"; do
+              if git apply --reverse --check "$P" 2>/dev/null; then
+                  : # already applied; leave it
+              elif git apply --check "$P" 2>/dev/null; then
+                  git apply "$P"
+                  APPLIED_BY_US+=("$P")
+              else
+                  echo "Error: $P can neither be applied nor is already applied." >&2
+                  echo "Resolve any local edits to the affected source files and retry." >&2
+                  # revert anything we've already applied this run
+                  for Q in "''${APPLIED_BY_US[@]}"; do
+                      git apply --reverse "$Q" 2>/dev/null || true
+                  done
+                  exit 1
+              fi
+          done
 
           CONFIG_DIR=$(mktemp -d)
           cleanup() {
               rm -rf "$CONFIG_DIR"
-              if [ "$PATCHED_BY_US" = "1" ]; then
-                  git apply --reverse "$PATCH" 2>/dev/null || \
-                      echo "Warning: failed to revert nix/main-kt-uiscale.patch — check 'git diff'." >&2
-              fi
+              # Revert in reverse order of application, in case patches overlap.
+              for ((i=''${#APPLIED_BY_US[@]}-1; i>=0; i--)); do
+                  git apply --reverse "''${APPLIED_BY_US[$i]}" 2>/dev/null || \
+                      echo "Warning: failed to revert ''${APPLIED_BY_US[$i]} — check 'git diff'." >&2
+              done
           }
           trap cleanup EXIT INT TERM
           export VLABELER_CONFIG_DIR="$CONFIG_DIR"

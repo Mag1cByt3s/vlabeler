@@ -92,25 +92,27 @@ fetches dependencies as usual. The wrapper handles a few NixOS quirks:
    `XDG_DATA_DIRS` with `gsettings-desktop-schemas` and `gtk3` schema paths.
 2. **Native libraries** for Compose Desktop, Skiko, vlcj, and lwjgl-nfd are
    placed on `LD_LIBRARY_PATH` so the JVM can `dlopen` them.
-3. **HiDPI scaling** doesn't work end-to-end on Linux out of the box —
-   Compose Desktop 1.6 doesn't pick up AWT's `defaultTransform` for
-   `LocalDensity`. The wrapper applies `nix/main-kt-uiscale.patch` to
-   `Main.kt` before each build, which overrides `LocalDensity` from a
-   vlabeler-specific property (`vlabeler.uiScale`) that no JVM internal
-   touches. The patch is reverted on exit (including Ctrl-C) so the working
-   tree stays clean.
+3. **Source patches** applied before each build and reverted on exit
+   (including Ctrl-C), so `git status` stays clean:
+   - `nix/main-kt-uiscale.patch` — overrides `LocalDensity` from
+     `vlabeler.uiScale` so HiDPI scaling actually takes effect (Compose
+     Desktop 1.6 on Linux doesn't pick up AWT's `defaultTransform`).
+   - `nix/chartrepo-png-fix.patch` — normalises the `BufferedImage` Skiko
+     produces to `TYPE_INT_ARGB` before PNG encoding, fixing
+     `ArrayIndexOutOfBoundsException` in `PNGImageWriter.encodePass` that
+     would otherwise crash waveform rendering after opening a sample.
 4. **JVM forking**: compose-jb's `run` task forks a JVM whose JVM args we
    couldn't reliably override from outside. Instead the wrapper uses a Gradle
    init script to extract the run task's exact `classpath`, `mainClass`, and
    `allJvmArgs`, then `exec`s the JVM directly with full control.
 
 If you want a packaged binary (`./gradlew packageDistributionForCurrentOS`)
-with the HiDPI fix baked in, apply the patch manually first:
+with these fixes baked in, apply the patches manually first:
 
 ```sh
-git apply nix/main-kt-uiscale.patch
+git apply nix/*.patch
 ./gradlew packageDistributionForCurrentOS
-git apply -R nix/main-kt-uiscale.patch
+git apply -R nix/*.patch
 ```
 
 ## Scenarios

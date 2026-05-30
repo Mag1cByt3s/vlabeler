@@ -1,0 +1,29 @@
+diff --git a/src/jvmMain/kotlin/com/sdercolin/vlabeler/repository/ChartRepository.kt b/src/jvmMain/kotlin/com/sdercolin/vlabeler/repository/ChartRepository.kt
+index e6078163..35bdc9b0 100644
+--- a/src/jvmMain/kotlin/com/sdercolin/vlabeler/repository/ChartRepository.kt
++++ b/src/jvmMain/kotlin/com/sdercolin/vlabeler/repository/ChartRepository.kt
+@@ -16,6 +16,7 @@ import com.sdercolin.vlabeler.util.stringifyJson
+ import kotlinx.coroutines.delay
+ import kotlinx.serialization.Serializable
+ import org.jetbrains.skiko.toBufferedImage
++import java.awt.image.BufferedImage
+ import java.io.File
+ import javax.imageio.ImageIO
+ 
+@@ -159,7 +160,15 @@ object ChartRepository {
+             file.parentFile.mkdirs()
+         }
+         val outputStream = file.outputStream()
+-        ImageIO.write(image.asSkiaBitmap().toBufferedImage(), "png", outputStream)
++
++        val rawImage = image.asSkiaBitmap().toBufferedImage()
++        val safeImage = BufferedImage(rawImage.width, rawImage.height, BufferedImage.TYPE_INT_ARGB)
++        val g = safeImage.createGraphics()
++        g.drawImage(rawImage, 0, 0, null)
++        g.dispose()
++
++        ImageIO.write(safeImage, "png", outputStream)
++
+         outputStream.flush()
+         outputStream.close()
+         cacheMap[cacheKey] = file.relativeTo(cacheDirectory).path.replace(File.separatorChar, '/')
